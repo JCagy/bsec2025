@@ -213,15 +213,90 @@ if data is not None:
                 st.info(f"**{den[:2]}**\n\n{h}")
 
         # Hlavní mapa pod detailem
-        if pd.notna(radek['latitude']):
-            m_html = f"""
+        # --- HLAVNÍ MAPA POD DETAILEM ---
+        if pd.notna(radek['latitude']) and pd.notna(radek['longitude']):
+            st.info("💡 **Navigace:** Klikněte do mapy nebo použijte tlačítko pro výpočet trasy k tomuto lékaři.")
+            
+            # Ošetření textů pro JavaScript
+            clean_name = str(radek['ZZ_nazev']).replace("'", "").replace('"', "")
+            
+            m_main_html = f"""
             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <div id="m_main" style="height: 400px; border-radius: 10px;"></div>
+            <style>
+                #map-wrapper {{ position: relative; width: 100%; height: 450px; }}
+                #main_map {{ width: 100%; height: 100%; border-radius: 10px; border: 1px solid #ddd; }}
+                .gps-button {{
+                    position: absolute; top: 10px; right: 10px; z-index: 1000;
+                    background: white; border: 2px solid rgba(0,0,0,0.2);
+                    padding: 8px 12px; cursor: pointer; border-radius: 4px;
+                    font-weight: bold; font-family: sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                }}
+                .gps-button:hover {{ background: #f4f4f4; }}
+            </style>
+            
+            <div id="map-wrapper">
+                <button class="gps-button" onclick="locateMe()">📍 Použít mou polohu</button>
+                <div id="main_map"></div>
+            </div>
+
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <script>
-                var m = L.map('m_main').setView([{radek['latitude']}, {radek['longitude']}], 15);
-                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png').addTo(m);
-                L.marker([{radek['latitude']}, {radek['longitude']}]).addTo(m).bindPopup("{radek['ZZ_nazev']}");
+                var doctorLoc = [{radek['latitude']}, {radek['longitude']}];
+                var map = L.map('main_map').setView(doctorLoc, 15);
+                
+                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                    attribution: '© OpenStreetMap'
+                }}).addTo(map);
+
+                // Cíl (Lékař)
+                var markerDoc = L.marker(doctorLoc).addTo(map)
+                    .bindPopup("<b>{clean_name}</b><br>Cíl navigace")
+                    .openPopup();
+
+                var routeLine = null;
+                var userMarker = null;
+
+                async function calculateRoute(lat, lng) {{
+                    // OSRM API pro chůzi
+                    var url = "https://router.project-osrm.org/route/v1/foot/" + 
+                              lng + "," + lat + ";" + 
+                              doctorLoc[1] + "," + doctorLoc[0] + "?overview=full&geometries=geojson";
+                    
+                    try {{
+                        var response = await fetch(url);
+                        var data = await response.json();
+                        
+                        if (data.routes && data.routes[0]) {{
+                            var route = data.routes[0];
+                            var dist = (route.distance / 1000).toFixed(2);
+                            var dur = Math.round(route.duration / 60);
+
+                            if (routeLine) map.removeLayer(routeLine);
+                            routeLine = L.geoJSON(route.geometry, {{
+                                style: {{ color: '#ff4b4b', weight: 6, opacity: 0.7 }}
+                            }}).addTo(map);
+
+                            if (!userMarker) {{
+                                userMarker = L.circleMarker([lat, lng], {{ color: '#007bff', radius: 8, fillOpacity: 0.9 }}).addTo(map);
+                            }} else {{
+                                userMarker.setLatLng([lat, lng]);
+                            }}
+
+                            userMarker.bindPopup("<b>Váš start</b><br>Vzdálenost: " + dist + " km<br>Čas: " + dur + " min").openPopup();
+                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
+                        }}
+                    }} catch (e) {{ console.error(e); }}
+                }}
+
+                function locateMe() {{
+                    navigator.geolocation.getCurrentPosition(function(pos) {{
+                        calculateRoute(pos.coords.latitude, pos.coords.longitude);
+                    }}, function() {{ alert("Nelze získat polohu."); }});
+                }}
+
+                map.on('click', function(e) {{
+                    calculateRoute(e.latlng.lat, e.latlng.lng);
+                }});
             </script>
             """
-            components.html(m_html, height=420)
+            components.html(m_main_html, height=470)

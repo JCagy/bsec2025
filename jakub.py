@@ -132,58 +132,6 @@ if data is not None:
                 var doctorMarker = L.marker(dest).addTo(map)
                     .bindPopup("<b>{ciste_jmeno}</b><br>Cíl cesty")
                     .openPopup();
-
-                var routeLine = null;
-                var startMarker = null;
-
-                async function getRoute(lat, lng) {{
-                    var url = "https://router.project-osrm.org/route/v1/foot/" + 
-                              lng + "," + lat + ";" + 
-                              dest[1] + "," + dest[0] + "?overview=full&geometries=geojson";
-                    
-                    try {{
-                        var response = await fetch(url);
-                        var data = await response.json();
-                        
-                        if (data.routes && data.routes[0]) {{
-                            var route = data.routes[0];
-                            var distance = (route.distance / 1000).toFixed(2);
-                            var duration = Math.round(route.duration / 60);
-
-                            if (routeLine) map.removeLayer(routeLine);
-                            routeLine = L.geoJSON(route.geometry, {{
-                                style: {{ color: '#ff4b4b', weight: 5, opacity: 0.7 }}
-                            }}).addTo(map);
-
-                            if (!startMarker) {{
-                                startMarker = L.circleMarker([lat, lng], {{ color: '#007bff', radius: 8, fillOpacity: 0.9 }}).addTo(map);
-                            }} else {{
-                                startMarker.setLatLng([lat, lng]);
-                            }}
-
-                            startMarker.bindPopup("<b>Váš start</b><br>Vzdálenost: " + distance + " km<br>Čas chůze: cca " + duration + " min").openPopup();
-                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
-                        }}
-                    }} catch (e) {{
-                        alert("Chyba při výpočtu trasy.");
-                    }}
-                }}
-
-                function getLocation() {{
-                    if (navigator.geolocation) {{
-                        navigator.geolocation.getCurrentPosition(function(position) {{
-                            getRoute(position.coords.latitude, position.coords.longitude);
-                        }}, function() {{
-                            alert("Nelze získat vaši polohu. Zkontrolujte oprávnění v prohlížeči.");
-                        }});
-                    }} else {{
-                        alert("Váš prohlížeč nepodporuje geolokaci.");
-                    }}
-                }}
-
-                map.on('click', function(e) {{
-                    getRoute(e.latlng.lat, e.latlng.lng);
-                }});
             </script>
             """
             components.html(mapa_html, height=470)

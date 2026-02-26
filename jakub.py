@@ -12,7 +12,7 @@ st.markdown("Najděte si lékaře v Jihomoravském kraji a nechte se k němu nav
 def nacti_data():
     # Načtení souboru (ujisti se, že soubor je ve stejné složce jako skript)
     try:
-        df = pd.read_csv("vysledny_spojeny_soubor.csv", sep=";", low_memory=False)
+        df = pd.read_csv("vysledny_spojeny_soubor_clean.csv", sep=";", low_memory=False)
     except FileNotFoundError:
         # Pokud soubor neexistuje, vytvoříme prázdný DataFrame pro testování
         st.error("Soubor 'vysledny_spojeny_soubor.csv' nebyl nalezen!")

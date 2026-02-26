@@ -1,152 +1,189 @@
 import streamlit as st
 import pandas as pd
 import streamlit.components.v1 as components
+import urllib.parse
 
-# 1. Nastavení stránky
-st.set_page_config(page_title="Vyhledávač lékařů JHM", layout="wide")
-st.title("Vyhledávač lékařských zařízení a ambulancí 🩺")
-st.markdown("Najděte si lékaře v Jihomoravském kraji a nechte se k němu navigovat.")
+st.set_page_config(page_title="Lékaři Brno", layout="wide")
 
-# 2. Načtení a příprava dat
+# FUNKCE PRO NAČTENÍ DAT
 @st.cache_data
 def nacti_data():
-    # Načtení souboru (ujisti se, že soubor je ve stejné složce jako skript)
     try:
-        df = pd.read_csv("vysledny_spojeny_soubor_clean.csv", sep=";", low_memory=False)
-    except FileNotFoundError:
-        # Pokud soubor neexistuje, vytvoříme prázdný DataFrame pro testování
-        st.error("Soubor 'vysledny_spojeny_soubor.csv' nebyl nalezen!")
-        return pd.DataFrame()
-    
-    # Vyčištění GPS souřadnic
-    def zpracuj_gps(gps_text):
-        try:
-            if pd.isna(gps_text) or gps_text == "": return None, None
-            # Odstranění písmen a rozdělení
-            ciste = str(gps_text).replace('N', '').replace('E', '').replace(' ', '').split(',')
-            return float(ciste[0]), float(ciste[1])
-        except:
-            return None, None
+        df = pd.read_csv("upraveni_lekari_brno_s_hodinami.csv", sep=";", low_memory=False)
+        df.columns = df.columns.str.strip()
+        df.index = range(1, len(df) + 1)
+        
+        def oprav_web(row):
+            web = str(row.get('poskytovatel_web', ''))
+            if web == '' or web.lower() == 'nan' or web == 'None':
+                jmeno = urllib.parse.quote_plus(str(row['ZZ_nazev']))
+                return f"https://www.google.com/search?q={jmeno}"
+            if not web.startswith('http'):
+                return "https://" + web
+            return web
 
-    # Vytvoříme nové sloupce lat a lon
-    coords = df['ZZ_GPS'].apply(zpracuj_gps)
-    df['lat'] = [x[0] for x in coords]
-    df['lon'] = [x[1] for x in coords]
-    
-    # Vyplníme prázdné hodnoty
-    df['ZZ_obor_pece'] = df['ZZ_obor_pece'].fillna('Neuvedeno')
-    df['Obec'] = df['Obec'].fillna('Neuvedeno')
-    df['NazevCely'] = df['NazevCely'].fillna('Neznámý název')
-    
-    return df
+        if 'ZZ_nazev' in df.columns:
+            df['web_odkaz'] = df.apply(oprav_web, axis=1)
+        else:
+            df['web_odkaz'] = ""
+            
+        return df
+    except Exception as e:
+        st.error(f"❌ Chyba při načítání dat: {e}")
+        return None
 
 data = nacti_data()
 
-if not data.empty:
-    # 3. BOČNÍ PANEL
-    st.sidebar.header("Možnosti filtrování")
+if data is not None:
+    st.title("Vyhledávač lékařských zařízení Brno 🩺")
 
-    seznam_oboru = ["Všechny"] + sorted(list(data['ZZ_obor_pece'].unique()))
-    seznam_obci = ["Všechny"] + sorted(list(data['Obec'].unique()))
+    # --- FILTRY ---
+    st.sidebar.header("Filtrování")
+    col_obor = 'ZZ_obor_pece_strucne' if 'ZZ_obor_pece_strucne' in data.columns else data.columns[0]
+    
+    seznam_oboru = ["Všechny"] + sorted(list(data[col_obor].astype(str).unique()))
+    vybrany_obor = st.sidebar.selectbox("Odbornost", seznam_oboru)
 
-    vybrana_obec = st.sidebar.selectbox("Město / Obec", seznam_obci)
-    vybrany_obor = st.sidebar.selectbox("Téma odbornosti", seznam_oboru)
-
-    # 4. FILTROVÁNÍ DAT
-    vyfiltrovana_data = data.copy()
-    if vybrana_obec != "Všechny":
-        vyfiltrovana_data = vyfiltrovana_data[vyfiltrovana_data['Obec'] == vybrana_obec]
+    df_filtered = data.copy()
     if vybrany_obor != "Všechny":
-        vyfiltrovana_data = vyfiltrovana_data[vyfiltrovana_data['ZZ_obor_pece'] == vybrany_obor]
+        df_filtered = df_filtered[df_filtered[col_obor] == vybrany_obor]
 
-    # 5. ZOBRAZENÍ TABULKY
-    st.subheader(f"Nalezená zařízení ({len(vyfiltrovana_data)})")
-    cols_to_show = ['NazevCely', 'ZZ_obor_pece', 'Obec', 'Ulice', 'poskytovatel_telefon']
-    st.dataframe(vyfiltrovana_data[cols_to_show], use_container_width=True)
+    # --- TABULKA ---
+    st.subheader(f"Seznam zařízení ({len(df_filtered)})")
+    vsechny_mozne_sloupce = ['ZZ_nazev', 'ZZ_obor_pece_strucne', 'ZZ_obec', 'ZZ_ulice', 'ZZ_cislo_domovni_orientacni']
+    existujici_pro_tabulku = [c for c in vsechny_mozne_sloupce if c in data.columns]
+    
+    st.dataframe(
+        df_filtered[existujici_pro_tabulku + ['web_odkaz']], 
+        use_container_width=True,
+        column_config={
+            "web_odkaz": st.column_config.LinkColumn("Web / Google Search"),
+            "ZZ_nazev": "Název",
+            "ZZ_obor_pece_strucne": "Obor",
+            "ZZ_obec": "Obec",
+            "ZZ_ulice": "Ulice",
+            "ZZ_cislo_domovni_orientacni":"Číslo popisné/orientační",
+        }
+    )
 
     st.markdown("---")
 
-    # 6. VÝBĚR CÍLE PRO MAPU
-    st.subheader("Navigace k vybranému zařízení 🗺️")
-
-    if not vyfiltrovana_data.empty:
-        vyfiltrovana_data['Vyberove_jmeno'] = vyfiltrovana_data['NazevCely'] + " (" + vyfiltrovana_data['Ulice'].astype(str) + ")"
-        vybrany_lekar_jmeno = st.selectbox("Vyberte zařízení pro navigaci:", vyfiltrovana_data['Vyberove_jmeno'])
+    # --- DETAIL A MAPA ---
+    if not df_filtered.empty:
+        st.subheader("Detail a navigace")
         
-        cile = vyfiltrovana_data[vyfiltrovana_data['Vyberove_jmeno'] == vybrany_lekar_jmeno].iloc[0]
+        col_jmeno = 'ZZ_nazev' if 'ZZ_nazev' in data.columns else data.columns[0]
+        vyber_text = df_filtered[col_jmeno].astype(str) + " (" + df_filtered.index.astype(str) + ")"
+        vybrany_label = st.selectbox("Vyberte lékaře pro detaily:", vyber_text)
         
-        cilova_lat = cile['lat']
-        cilova_lon = cile['lon']
-        nazev_cile = cile['NazevCely'].replace("'", "") # Odstranění uvozovek pro JS
-        adresa_cile = f"{cile['Ulice']}, {cile['Obec']}".replace("'", "")
+        idx = int(vybrany_label.split("(")[-1].replace(")", ""))
+        radek = df_filtered.loc[idx]
 
-        if pd.isna(cilova_lat) or pd.isna(cilova_lon):
-            st.warning(f"Zařízení '{nazev_cile}' nemá GPS souřadnice.")
-        else:
-            # 7. VYKRESLENÍ MAPY
-            mapa_html = """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-                <style>
-                    body { margin: 0; font-family: sans-serif; }
-                    #container { display: flex; height: 100vh; flex-direction: row; }
-                    #sidebar { width: 300px; background: white; padding: 15px; border-right: 1px solid #ddd; z-index: 1000; }
-                    #map { flex: 1; }
-                    .stat-box { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; }
-                    .stat-box h2 { font-size: 12px; color: #666; margin: 0; }
-                    .stat-box p { font-size: 20px; font-weight: bold; margin: 5px 0 0 0; }
-                </style>
-            </head>
-            <body>
-            <div id="container">
-                <div id="sidebar">
-                    <div class="stat-box"><h2>Délka trasy</h2><p id="distance">-- km</p></div>
-                    <div class="stat-box"><h2>Doba chůze</h2><p id="duration">-- min</p></div>
-                    <div class="stat-box"><h2>Cíl</h2><p style="font-size: 14px;">__NAZEV__</p></div>
-                    <p style="font-size: 12px; color: #888;">Klikněte do mapy pro start trasy.</p>
-                </div>
+        # --- ORDINAČNÍ HODINY ---
+        st.write("### 🕒 Ordinační hodiny")
+        dni = ['Pondělí', 'Úterý', 'Středa', 'Čtvrtek', 'Pátek', 'Sobota', 'Neděle']
+        cols = st.columns(7)
+        
+        for i, den in enumerate(dni):
+            with cols[i]:
+                hodnota = str(radek[den]) if den in radek else "neuvedena"
+                if hodnota.lower() not in ['neuvedena', 'nan', 'x', '']:
+                    st.info(f"**{den[:2]}**\n\n{hodnota}")
+                else:
+                    st.warning(f"**{den[:2]}**\n\nneuvedeno")
+
+        # --- MAPA S NAVIGACÍ A GEOLOKACÍ ---
+        col_lat = 'latitude' if 'latitude' in data.columns else None
+        col_lon = 'longitude' if 'longitude' in data.columns else None
+
+        if col_lat and pd.notna(radek[col_lat]):
+            st.info("💡 **Tip:** Klikněte do mapy nebo použijte tlačítko pro zaměření vaší polohy a výpočet trasy.")
+            
+            ciste_jmeno = str(radek[col_jmeno]).replace('"', '').replace("'", "")
+            
+            mapa_html = f"""
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <style>
+                #map-container {{ position: relative; width: 100%; height: 450px; }}
+                #map {{ width: 100%; height: 100%; border-radius: 10px; }}
+                #loc-button {{
+                    position: absolute; top: 10px; right: 10px; z-index: 1000;
+                    background: white; border: 2px solid rgba(0,0,0,0.2);
+                    padding: 8px 12px; cursor: pointer; border-radius: 4px;
+                    font-weight: bold; font-family: sans-serif; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }}
+                #loc-button:hover {{ background: #f4f4f4; }}
+            </style>
+            
+            <div id="map-container">
+                <button id="loc-button" onclick="getLocation()">📍 Použít mou polohu</button>
                 <div id="map"></div>
             </div>
 
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <script>
-                const destination = [__LAT__, __LON__];
-                const map = L.map('map').setView(destination, 15);
+                var dest = [{radek[col_lat]}, {radek[col_lon]}];
+                var map = L.map('map').setView(dest, 15);
+                
+                L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+                    attribution: '© OpenStreetMap'
+                }}).addTo(map);
 
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
-                L.marker(destination).addTo(map).bindPopup("__NAZEV__").openPopup();
+                var doctorMarker = L.marker(dest).addTo(map)
+                    .bindPopup("<b>{ciste_jmeno}</b><br>Cíl cesty")
+                    .openPopup();
 
-                let routeLine, startMarker;
+                var routeLine = null;
+                var startMarker = null;
 
-                async function getRoute(start) {
-                    const url = `https://router.project-osrm.org/route/v1/foot/${start[1]},${start[0]};${destination[1]},${destination[0]}?overview=full&geometries=geojson`;
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    if (data.routes && data.routes[0]) {
-                        const r = data.routes[0];
-                        document.getElementById('distance').innerText = (r.distance/1000).toFixed(1) + ' km';
-                        document.getElementById('duration').innerText = Math.round(r.duration/60) + ' min';
-                        if (routeLine) map.removeLayer(routeLine);
-                        routeLine = L.geoJSON(r.geometry, {style: {color: '#e63946', weight: 5}}).addTo(map);
-                    }
-                }
+                async function getRoute(lat, lng) {{
+                    var url = "https://router.project-osrm.org/route/v1/foot/" + 
+                              lng + "," + lat + ";" + 
+                              dest[1] + "," + dest[0] + "?overview=full&geometries=geojson";
+                    
+                    try {{
+                        var response = await fetch(url);
+                        var data = await response.json();
+                        
+                        if (data.routes && data.routes[0]) {{
+                            var route = data.routes[0];
+                            var distance = (route.distance / 1000).toFixed(2);
+                            var duration = Math.round(route.duration / 60);
 
-                map.on('click', function(e) {
-                    if (startMarker) startMarker.setLatLng(e.latlng);
-                    else startMarker = L.circleMarker(e.latlng, {color: '#007bff'}).addTo(map);
-                    getRoute([e.latlng.lat, e.latlng.lng]);
-                });
+                            if (routeLine) map.removeLayer(routeLine);
+                            routeLine = L.geoJSON(route.geometry, {{
+                                style: {{ color: '#ff4b4b', weight: 5, opacity: 0.7 }}
+                            }}).addTo(map);
+
+                            if (!startMarker) {{
+                                startMarker = L.circleMarker([lat, lng], {{ color: '#007bff', radius: 8, fillOpacity: 0.9 }}).addTo(map);
+                            }} else {{
+                                startMarker.setLatLng([lat, lng]);
+                            }}
+
+                            startMarker.bindPopup("<b>Váš start</b><br>Vzdálenost: " + distance + " km<br>Čas chůze: cca " + duration + " min").openPopup();
+                            map.fitBounds(routeLine.getBounds(), {{padding: [50, 50]}});
+                        }}
+                    }} catch (e) {{
+                        alert("Chyba při výpočtu trasy.");
+                    }}
+                }}
+
+                function getLocation() {{
+                    if (navigator.geolocation) {{
+                        navigator.geolocation.getCurrentPosition(function(position) {{
+                            getRoute(position.coords.latitude, position.coords.longitude);
+                        }}, function() {{
+                            alert("Nelze získat vaši polohu. Zkontrolujte oprávnění v prohlížeči.");
+                        }});
+                    }} else {{
+                        alert("Váš prohlížeč nepodporuje geolokaci.");
+                    }}
+                }}
+
+                map.on('click', function(e) {{
+                    getRoute(e.latlng.lat, e.latlng.lng);
+                }});
             </script>
-            </body>
-            </html>
             """
-            # Oprava: placeholderů
-            mapa_html = mapa_html.replace("__LAT__", str(cilova_lat))
-            mapa_html = mapa_html.replace("__LON__", str(cilova_lon))
-            mapa_html = mapa_html.replace("__NAZEV__", nazev_cile)
-            
-            components.html(mapa_html, height=600)
-    else:
-        st.info("Žádné výsledky.")
+            components.html(mapa_html, height=470)
